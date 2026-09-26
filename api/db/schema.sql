@@ -98,4 +98,17 @@ CREATE TABLE IF NOT EXISTS `settings` (
   PRIMARY KEY (`key_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 7. Admins Table (Email & Password Authentication)
+CREATE TABLE IF NOT EXISTS `admins` (
+  `id` VARCHAR(64) NOT NULL,
+  `email` VARCHAR(128) NOT NULL UNIQUE,
+  `password_hash` VARCHAR(255) NOT NULL,
+  `name` VARCHAR(128) DEFAULT 'Admin',
+  `role` VARCHAR(32) DEFAULT 'admin',
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_admin_email` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

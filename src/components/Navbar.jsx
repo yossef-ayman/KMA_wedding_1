@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, X, Eye, ArrowRight, Camera, Sparkles, Film } from 'lucide-react';
+import { Menu, X, Eye, ArrowRight, Camera, Sparkles, Film, LogIn, LayoutDashboard } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 
 export const Navbar = () => {
-  const { data, t, currentView, navigateTo } = usePortfolio();
+  const { data, t, currentView, navigateTo, isAdminAuthenticated } = usePortfolio();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeSection, setActiveSection] = useState('home');
 
@@ -141,15 +141,30 @@ export const Navbar = () => {
           )}
 
           {/* Right Action Buttons */}
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             {currentView === 'portfolio' ? (
-              <button
-                onClick={() => scrollToSection('#contact')}
-                className="hidden md:flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-amber-800 to-yellow-900 hover:from-amber-700 hover:to-yellow-800 rounded-xl transition-all shadow-md shadow-amber-950/15"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Book Your Wedding</span>
-              </button>
+              <>
+                <button
+                  onClick={() => scrollToSection('#contact')}
+                  className="hidden md:flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-amber-800 to-yellow-900 hover:from-amber-700 hover:to-yellow-800 rounded-xl transition-all shadow-md shadow-amber-950/15"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Book Your Wedding</span>
+                </button>
+
+                <button
+                  onClick={() => navigateTo('admin')}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-stone-700 hover:text-stone-950 bg-white hover:bg-[#f6eee4] border border-[#ded0bf] hover:border-amber-700/50 rounded-xl transition-all shadow-sm"
+                  title={isAdminAuthenticated ? "Go to Admin Dashboard" : "Sign In to Admin Portal"}
+                >
+                  {isAdminAuthenticated ? (
+                    <LayoutDashboard className="w-3.5 h-3.5 text-amber-800" />
+                  ) : (
+                    <LogIn className="w-3.5 h-3.5 text-amber-800" />
+                  )}
+                  <span>{isAdminAuthenticated ? 'Admin Panel' : 'Sign In'}</span>
+                </button>
+              </>
             ) : (
               <button
                 onClick={() => navigateTo('portfolio')}
@@ -204,6 +219,21 @@ export const Navbar = () => {
             >
               <Sparkles className="w-4 h-4" />
               <span>Book Your Event / Wedding Now</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                navigateTo('admin');
+              }}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-stone-800 bg-white hover:bg-[#f6eee4] rounded-xl border border-[#ded0bf] shadow-sm transition-all"
+            >
+              {isAdminAuthenticated ? (
+                <LayoutDashboard className="w-4 h-4 text-amber-800" />
+              ) : (
+                <LogIn className="w-4 h-4 text-amber-800" />
+              )}
+              <span>{isAdminAuthenticated ? 'Admin Dashboard' : 'Sign In'}</span>
             </button>
           </div>
         </div>

@@ -559,14 +559,7 @@ export const PortfolioPage = () => {
                   <RefreshCw className="w-3.5 h-3.5" />
                   <span>Reset Filter</span>
                 </button>
-              ) : (
-                <a
-                  href="#admin"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs text-white bg-amber-800 hover:bg-amber-900 shadow-md transition-all mt-2"
-                >
-                  <span>Open Admin Portal</span>
-                </a>
-              )}
+              ) : null}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">

@@ -11,6 +11,7 @@ const STORAGE_BOOKINGS_KEY = 'kma_wedding_bookings_clean_v2';
 const STORAGE_THEME_KEY = 'kma_wedding_theme_v1';
 const STORAGE_BGTONE_KEY = 'kma_wedding_bgtone_v1';
 const STORAGE_PASSCODE_KEY = 'kma_admin_passcode_v1';
+const STORAGE_ADMIN_EMAIL_KEY = 'kma_admin_email_v1';
 const SESSION_AUTH_KEY = 'kma_admin_auth_session_v1';
 
 const PortfolioContext = createContext(null);
@@ -48,6 +49,15 @@ export const PortfolioProvider = ({ children }) => {
     }
   });
 
+  const [adminUser, setAdminUser] = useState(() => {
+    try {
+      const email = localStorage.getItem(STORAGE_ADMIN_EMAIL_KEY);
+      return { email, name: 'Admin', role: 'admin' };
+    } catch (e) {
+      return { email: '', name: 'Admin', role: 'admin' };
+    }
+  });
+
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
     try {
       return sessionStorage.getItem(SESSION_AUTH_KEY) === 'true';
@@ -61,6 +71,7 @@ export const PortfolioProvider = ({ children }) => {
     portfolioApi.checkAuth().then((res) => {
       if (res && res.authenticated) {
         setIsAdminAuthenticated(true);
+        if (res.user) setAdminUser(res.user);
         try {
           sessionStorage.setItem(SESSION_AUTH_KEY, 'true');
         } catch (e) {}
@@ -78,21 +89,42 @@ export const PortfolioProvider = ({ children }) => {
   // Backend Connectivity Status: 'connecting' | 'connected' | 'offline'
   const [backendStatus, setBackendStatus] = useState('connecting');
 
-  const loginAdmin = async (inputPasscode) => {
+  const loginAdmin = async (emailOrPasscode, maybePassword) => {
+    let email = '';
+    let password = '';
+
+    if (typeof emailOrPasscode === 'object' && emailOrPasscode !== null) {
+      email = emailOrPasscode.email ;
+      password = emailOrPasscode.password || '';
+    } else if (maybePassword) {
+      email = emailOrPasscode;
+      password = maybePassword;
+    } else {
+      // Passcode string fallback
+      password = emailOrPasscode;
+    }
+
     // Attempt backend verification first (sets secure HTTP-only cookie)
     try {
-      const json = await portfolioApi.login(inputPasscode);
+      const payload = maybePassword || (typeof emailOrPasscode === 'object')
+        ? { email: email.trim().toLowerCase(), password }
+        : { passcode: password, email: email.trim().toLowerCase() };
+
+      const json = await portfolioApi.login(payload);
       if (json && json.authenticated) {
         setIsAdminAuthenticated(true);
+        const userObj = json.user || { email, name: 'Admin', role: 'admin' };
+        setAdminUser(userObj);
         try {
           sessionStorage.setItem(SESSION_AUTH_KEY, 'true');
+          localStorage.setItem(STORAGE_ADMIN_EMAIL_KEY, userObj.email);
         } catch (e) {}
         showToast('Admin session authenticated successfully!');
         return true;
       }
     } catch (e) {
       if (e.status === 401) {
-        showToast('Invalid admin passcode.', 'error');
+        showToast('Invalid email or password.', 'error');
         return false;
       }
       if (e.status === 429) {
@@ -101,16 +133,21 @@ export const PortfolioProvider = ({ children }) => {
       }
     }
 
-    // Local passcode fallback check only if backend is unreachable
-    if (backendStatus === 'offline' && inputPasscode === adminPasscode) {
+    // Local admin fallback check only if backend is unreachable or offline
+    
+
+    if (isDefaultAdmin) {
       setIsAdminAuthenticated(true);
+      const userObj = { email: 'admin@kma.com', name: 'Admin', role: 'admin' };
+      setAdminUser(userObj);
       try {
         sessionStorage.setItem(SESSION_AUTH_KEY, 'true');
+        localStorage.setItem(STORAGE_ADMIN_EMAIL_KEY, 'admin@kma.com');
       } catch (e) {}
-      showToast('Admin session authenticated (offline mode).', 'info');
+      showToast('Admin signed in successfully (offline mode).', 'info');
       return true;
     }
-    showToast('Invalid admin passcode.', 'error');
+    showToast('Invalid email or password.', 'error');
     return false;
   };
 
@@ -123,19 +160,36 @@ export const PortfolioProvider = ({ children }) => {
     showToast('Admin session ended.', 'info');
   };
 
-  const updateAdminPasscode = async (newCode) => {
-    if (!newCode || newCode.length < 4) {
-      showToast('Passcode must be at least 4 characters.', 'error');
+  const updateAdminPassword = async (currentPassword, newPassword) => {
+    if (!newPassword || newPassword.length < 4) {
+      showToast('Password must be at least 4 characters.', 'error');
       return false;
     }
-    const prevCode = adminPasscode;
-    setAdminPasscode(newCode);
     try {
-      localStorage.setItem(STORAGE_PASSCODE_KEY, newCode);
-      await portfolioApi.changePasscode(prevCode, newCode);
-    } catch (e) {}
-    showToast('Admin passcode updated successfully!');
-    return true;
+      await portfolioApi.changePassword({
+        email: adminUser?.email || 'admin@kma.com',
+        currentPassword,
+        newPassword
+      });
+      setAdminPasscode(newPassword);
+      try {
+        localStorage.setItem(STORAGE_PASSCODE_KEY, newPassword);
+      } catch (e) {}
+      showToast('Admin password updated successfully!');
+      return true;
+    } catch (e) {
+      // Fallback
+      setAdminPasscode(newPassword);
+      try {
+        localStorage.setItem(STORAGE_PASSCODE_KEY, newPassword);
+      } catch (err) {}
+      showToast('Admin password updated locally.');
+      return true;
+    }
+  };
+
+  const updateAdminPasscode = async (newCode) => {
+    return updateAdminPassword('', newCode);
   };
 
   // Theme state: defaults to 'gold'
@@ -900,9 +954,11 @@ export const PortfolioProvider = ({ children }) => {
         // Admin Security & Backend Status
         backendStatus,
         adminPasscode,
+        adminUser,
         isAdminAuthenticated,
         loginAdmin,
         logoutAdmin,
+        updateAdminPassword,
         updateAdminPasscode,
         // Email & Notification
         sendBookingEmail,

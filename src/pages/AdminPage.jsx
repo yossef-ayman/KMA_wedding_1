@@ -40,7 +40,9 @@ import {
   ArrowUp,
   ArrowDown,
   Play,
-  Image as ImageIcon
+  Image as ImageIcon,
+  LogIn,
+  ShieldCheck
 } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { AdminMediaUpload } from '../components/AdminMediaUpload';
@@ -86,10 +88,12 @@ export const AdminPage = () => {
     setBackgroundTone,
     BG_TONES,
     adminPasscode,
+    adminUser,
     isAdminAuthenticated,
     backendStatus,
     loginAdmin,
     logoutAdmin,
+    updateAdminPassword,
     updateAdminPasscode,
     sendTestEmail
   } = usePortfolio();
@@ -173,10 +177,16 @@ export const AdminPage = () => {
     };
   };
 
-  // Login Gate state
-  const [passcodeAttempt, setPasscodeAttempt] = useState('');
-  const [showPasscode, setShowPasscode] = useState(false);
-  const [newPasscodeInput, setNewPasscodeInput] = useState('');
+  // Login Gate state (Email & Password)
+  const [adminEmailInput, setAdminEmailInput] = useState('');
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+
+  // Settings Password Update state
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
 
   // Active admin tab: 'theme' | 'profile' | 'projects' | 'services' | 'milestones' | 'certificates' | 'skills' | 'bookings' | 'backup'
   const [activeTab, setActiveTab] = useState('theme');
@@ -830,20 +840,28 @@ export const AdminPage = () => {
     showToast('New booking added and synchronized successfully!');
   };
 
-  // Handle Passcode Submission for Login Gate
-  const handlePasscodeSubmit = (e) => {
+  // Handle Email & Password Submission for Login Gate
+  const handleAdminSignIn = async (e) => {
     e.preventDefault();
-    loginAdmin(passcodeAttempt);
-    setPasscodeAttempt('');
+    if (!adminEmailInput.trim() || !adminPasswordInput) {
+      showToast('Please enter both email and password.', 'error');
+      return;
+    }
+    setIsSigningIn(true);
+    const success = await loginAdmin(adminEmailInput.trim(), adminPasswordInput);
+    setIsSigningIn(false);
+    if (success) {
+      setAdminPasswordInput('');
+    }
   };
 
   // ============================================================
-  // ADMIN PASSCODE GATE
+  // ADMIN AUTHENTICATION GATE (EMAIL & PASSWORD SIGN IN)
   // ============================================================
   if (!isAdminAuthenticated) {
     return (
       <div className="min-h-screen bg-[#faf7f2] flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-white border border-[#ded0bf] rounded-3xl shadow-2xl p-8 space-y-6 text-center animate-fade-in relative overflow-hidden">
+        <div className="w-full max-w-md bg-white border border-[#ded0bf] rounded-3xl shadow-2xl p-8 space-y-6 animate-fade-in relative overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-amber-700 via-amber-800 to-yellow-800" />
 
           {/* Logo & Security Lock Icon */}
@@ -861,46 +879,74 @@ export const AdminPage = () => {
             </div>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 text-center">
             <h2 className="text-2xl font-bold text-stone-900 font-serif judicial-heading">
-              KMA Studio Master Lock
+              KMA Studio Admin Portal
             </h2>
             <p className="text-xs text-stone-500 leading-relaxed max-w-xs mx-auto">
-              Please enter your private admin passcode to access portfolio management, email settings, and client inquiries.
+              Please sign in with your administrator email and password to access portfolio management, bookings, and system settings.
             </p>
           </div>
 
-          <form onSubmit={handlePasscodeSubmit} className="space-y-4">
-            <div>
+          <form onSubmit={handleAdminSignIn} className="space-y-4">
+            {/* Email Field */}
+            <div className="space-y-1 text-left">
+              <label className="text-xs font-bold text-stone-700 flex items-center gap-1.5">
+                <Mail className="w-3.5 h-3.5 text-amber-800" />
+                <span>Admin Email</span>
+              </label>
+              <input
+                type="email"
+                autoFocus
+                required
+                value={adminEmailInput}
+                onChange={(e) => setAdminEmailInput(e.target.value)}
+                placeholder="Enter email"
+                className="w-full px-4 py-3 rounded-xl bg-[#fbf9f6] border border-[#ded0bf] text-xs font-medium text-stone-900 focus:outline-none focus:border-amber-700 shadow-inner"
+              />
+            </div>
+
+            {/* Password Field */}
+            <div className="space-y-1 text-left">
+              <label className="text-xs font-bold text-stone-700 flex items-center gap-1.5">
+                <Key className="w-3.5 h-3.5 text-amber-800" />
+                <span>Password</span>
+              </label>
               <div className="relative">
                 <input
-                  type={showPasscode ? "text" : "password"}
-                  autoFocus
+                  type={showPassword ? "text" : "password"}
                   required
-                  value={passcodeAttempt}
-                  onChange={(e) => setPasscodeAttempt(e.target.value)}
-                  placeholder="Enter Passcode..."
-                  className="w-full px-4 py-3.5 rounded-xl bg-[#fbf9f6] border border-[#ded0bf] text-center font-mono text-lg tracking-widest text-stone-900 focus:outline-none focus:border-amber-700 shadow-inner"
+                  value={adminPasswordInput}
+                  onChange={(e) => setAdminPasswordInput(e.target.value)}
+                  placeholder="Enter your password..."
+                  className="w-full px-4 py-3 rounded-xl bg-[#fbf9f6] border border-[#ded0bf] text-xs text-stone-900 focus:outline-none focus:border-amber-700 shadow-inner pr-14"
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPasscode(!showPasscode)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-stone-400 hover:text-stone-700"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-stone-400 hover:text-stone-700 cursor-pointer"
                 >
-                  {showPasscode ? "Hide" : "Show"}
+                  {showPassword ? "Hide" : "Show"}
                 </button>
               </div>
-              {/* <p className="text-[11px] text-stone-400 mt-2 font-mono">
-                Default PIN: <span className="font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">kma2026</span>
-              </p> */}
             </div>
 
             <button
               type="submit"
-              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-xs text-white bg-amber-800 hover:bg-amber-900 transition-all shadow-md"
+              disabled={isSigningIn}
+              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-xs text-white bg-amber-800 hover:bg-amber-900 transition-all shadow-md disabled:opacity-70 cursor-pointer"
             >
-              <Unlock className="w-4 h-4" />
-              <span>Unlock Admin Dashboard</span>
+              {isSigningIn ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Signing In...</span>
+                </>
+              ) : (
+                <>
+                  <LogIn className="w-4 h-4" />
+                  <span>Sign In to Admin Portal</span>
+                </>
+              )}
             </button>
 
             <button
@@ -3581,40 +3627,75 @@ export const AdminPage = () => {
               </p>
             </div>
 
-            {/* Passcode Security */}
+            {/* Admin Password Security */}
             <div className="p-6 rounded-2xl bg-[#fbf9f6] border border-[#e8dfd5] space-y-4">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-stone-900 text-white flex items-center justify-center shadow-sm">
                   <Key className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-stone-900 font-serif">Admin Passcode & PIN Security</h3>
+                  <h3 className="text-sm font-bold text-stone-900 font-serif">Admin Account & Password Security</h3>
                   <p className="text-xs text-stone-500">
-                    Current PIN is active. Enter a new 4+ digit code to update access security.
+                    Logged in as <span className="font-mono font-bold text-amber-900">{adminUser?.email }</span>. Update your administrative password below.
                   </p>
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row items-center gap-3 max-w-md">
-                <input
-                  type="text"
-                  value={newPasscodeInput}
-                  onChange={(e) => setNewPasscodeInput(e.target.value)}
-                  placeholder="Enter new 4+ character passcode..."
-                  className="w-full px-3 py-2.5 rounded-xl bg-white border border-[#ded0bf] text-xs font-mono font-bold text-stone-900 focus:outline-none focus:border-amber-700"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (updateAdminPasscode(newPasscodeInput)) {
-                      setNewPasscodeInput('');
-                    }
-                  }}
-                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold shrink-0 transition-colors shadow-sm"
-                >
-                  Update PIN
-                </button>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl">
+                <div>
+                  <label className="text-[11px] font-bold text-stone-600 block mb-1">Current Password</label>
+                  <input
+                    type="password"
+                    value={currentPasswordInput}
+                    onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                    placeholder="Current password"
+                    className="w-full px-3 py-2.5 rounded-xl bg-white border border-[#ded0bf] text-xs text-stone-900 focus:outline-none focus:border-amber-700"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-stone-600 block mb-1">New Password</label>
+                  <input
+                    type="password"
+                    value={newPasswordInput}
+                    onChange={(e) => setNewPasswordInput(e.target.value)}
+                    placeholder="New password (4+ chars)"
+                    className="w-full px-3 py-2.5 rounded-xl bg-white border border-[#ded0bf] text-xs text-stone-900 focus:outline-none focus:border-amber-700"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-stone-600 block mb-1">Confirm New Password</label>
+                  <input
+                    type="password"
+                    value={confirmPasswordInput}
+                    onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                    placeholder="Confirm new password"
+                    className="w-full px-3 py-2.5 rounded-xl bg-white border border-[#ded0bf] text-xs text-stone-900 focus:outline-none focus:border-amber-700"
+                  />
+                </div>
               </div>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!newPasswordInput || newPasswordInput.length < 4) {
+                    showToast('New password must be at least 4 characters.', 'error');
+                    return;
+                  }
+                  if (confirmPasswordInput && newPasswordInput !== confirmPasswordInput) {
+                    showToast('New passwords do not match.', 'error');
+                    return;
+                  }
+                  const ok = await updateAdminPassword(currentPasswordInput, newPasswordInput);
+                  if (ok) {
+                    setCurrentPasswordInput('');
+                    setNewPasswordInput('');
+                    setConfirmPasswordInput('');
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold transition-colors shadow-sm cursor-pointer"
+              >
+                Update Password
+              </button>
             </div>
 
             {/* Global Cloud Persistence Guide & Download Updated defaultData.js */}

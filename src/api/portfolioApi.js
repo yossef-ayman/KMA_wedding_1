@@ -37,9 +37,16 @@ export const portfolioApi = {
   deleteBooking: (id) => apiClient.delete(`/api/bookings/${id}`),
 
   // Admin Auth & Sessions
-  login: (passcode) => apiClient.post('/api/auth/login', { passcode }),
+  login: (credentials) => {
+    const payload =
+      typeof credentials === 'string'
+        ? { passcode: credentials }
+        : credentials;
+    return apiClient.post('/api/auth/login', payload);
+  },
   checkAuth: () => apiClient.get('/api/auth/me'),
   logout: () => apiClient.post('/api/auth/logout'),
+  changePassword: (data) => apiClient.post('/api/auth/change-password', data),
   changePasscode: (currentPasscode, newPasscode) =>
     apiClient.post('/api/auth/change-passcode', { currentPasscode, newPasscode }),
 

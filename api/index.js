@@ -17,7 +17,8 @@ import {
   projectRepo,
   serviceRepo,
   bookingRepo,
-  settingRepo
+  settingRepo,
+  adminRepo
 } from './db/mysql.js';
 
 dotenv.config();
@@ -29,7 +30,7 @@ const app = express();
 // ========================================================
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
-  : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5000', 'http://127.0.0.1:5000'];
+  : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5000', 'http://127.0.0.1:5000','http://localhost:5174', 'http://127.0.0.1:5174' ];
 
 app.use(
   cors({
@@ -93,6 +94,7 @@ const ROOT_DIR = path.resolve(__dirname, '..');
 const LOCAL_DATA_DIR = path.join(ROOT_DIR, 'data');
 const LOCAL_DATA_FILE = path.join(LOCAL_DATA_DIR, 'saved_portfolio.json');
 const LOCAL_BOOKINGS_FILE = path.join(LOCAL_DATA_DIR, 'saved_bookings.json');
+const LOCAL_ADMINS_FILE = path.join(LOCAL_DATA_DIR, 'saved_admins.json');
 const UPLOADS_DIR = path.join(ROOT_DIR, 'uploads');
 
 function ensureDirectories() {
@@ -244,6 +246,20 @@ const SettingsModel =
     })
   );
 
+const AdminModel =
+  mongoose.models.Admin ||
+  mongoose.model(
+    'Admin',
+    new mongoose.Schema({
+      email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+      password_hash: { type: String, required: true },
+      name: { type: String, default: 'Admin' },
+      role: { type: String, default: 'admin' },
+      createdAt: { type: Date, default: Date.now },
+      updatedAt: { type: Date, default: Date.now }
+    })
+  );
+
 async function initDB() {
   if (isMongoConnected) return true;
   if (!process.env.MONGODB_URI) return false;
@@ -277,16 +293,16 @@ app.use(async (req, res, next) => {
 // ========================================================
 const COOKIE_NAME = 'kma_admin_session';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'kma-secure-session-salt-2026';
-const activeSessions = new Map(); // sessionId -> { createdAt, expiresAt }
+const activeSessions = new Map(); // sessionId -> { createdAt, expiresAt, user }
 
-function createSessionToken() {
+function createSessionToken(user = { email: 'admin@kma.com', name: 'Admin', role: 'admin' }) {
   const sessionId = crypto.randomBytes(24).toString('hex');
   const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
   const payload = `${sessionId}.${expiresAt}`;
   const signature = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('hex');
   const token = `${payload}.${signature}`;
 
-  activeSessions.set(sessionId, { createdAt: Date.now(), expiresAt });
+  activeSessions.set(sessionId, { createdAt: Date.now(), expiresAt, user });
   return { token, sessionId, expiresAt };
 }
 
@@ -315,6 +331,15 @@ function verifySessionToken(token) {
   return true;
 }
 
+function getSessionUser(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const sessionId = parts[0];
+  const session = activeSessions.get(sessionId);
+  return session ? session.user : null;
+}
+
 const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
@@ -322,6 +347,91 @@ const COOKIE_OPTIONS = {
   maxAge: 24 * 60 * 60 * 1000,
   path: '/'
 };
+
+// Verify Admin Email & Password
+async function verifyAdminCredentials(email, password) {
+  if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
+    return null;
+  }
+  const cleanEmail = email.trim().toLowerCase();
+
+  // 1. Check MySQL Admins Table
+  if (isMySQLConnected()) {
+    try {
+      const row = await adminRepo.findByEmail(cleanEmail);
+      if (row && row.password_hash) {
+        const matches = await bcrypt.compare(password, row.password_hash);
+        if (matches) {
+          return { id: row.id, email: row.email, name: row.name || 'Admin', role: row.role || 'admin' };
+        }
+      }
+    } catch (e) {
+      console.warn('[Backend] MySQL admin check error:', e.message);
+    }
+  }
+
+  // 2. Check MongoDB Admins Collection
+  if (isMongoConnected) {
+    try {
+      const doc = await AdminModel.findOne({ email: cleanEmail });
+      if (doc && doc.password_hash) {
+        const matches = await bcrypt.compare(password, doc.password_hash);
+        if (matches) {
+          return { id: doc._id, email: doc.email, name: doc.name || 'Admin', role: doc.role || 'admin' };
+        }
+      }
+    } catch (e) {
+      console.warn('[Backend] MongoDB admin check error:', e.message);
+    }
+  }
+
+  // 3. Check Local File Admins (data/saved_admins.json) — READ-ONLY fallback
+  let admins = loadLocalFile(LOCAL_ADMINS_FILE, null);
+  if (Array.isArray(admins)) {
+    const admin = admins.find((a) => a.email && a.email.toLowerCase() === cleanEmail);
+    if (admin) {
+      if (admin.password_hash) {
+        const matches = await bcrypt.compare(password, admin.password_hash);
+        if (matches) {
+          return { id: admin.id, email: admin.email, name: admin.name || 'Admin', role: admin.role || 'admin' };
+        }
+      } else if (admin.password && admin.password === password) {
+        // Upgrade plaintext → hash in MySQL only; do NOT write back to JSON file
+        const hash = await bcrypt.hash(password, 10);
+        if (isMySQLConnected()) {
+          try { await adminRepo.updatePassword(admin.email, hash); } catch (e) {}
+        }
+        return { id: admin.id, email: admin.email, name: admin.name || 'Admin', role: admin.role || 'admin' };
+      }
+    }
+  }
+
+  // 4. Default Admin Fallback (admin@kma.com / kma2026 or ADMIN_PASSWORD)
+  if (cleanEmail === 'admin@kma.com') {
+    const defaultPass = process.env.ADMIN_PASSWORD || 'kma2026';
+    if (password === defaultPass) {
+      const hash = await bcrypt.hash(defaultPass, 10);
+      const defaultAdmin = {
+        id: 'admin_default',
+        email: 'admin@kma.com',
+        password_hash: hash,
+        name: 'KMA Admin',
+        role: 'admin'
+      };
+
+      // Persist to MySQL only — no JSON file write
+      if (isMySQLConnected()) {
+        try {
+          await adminRepo.upsertAdmin(defaultAdmin);
+        } catch (e) {}
+      }
+
+      return { id: defaultAdmin.id, email: defaultAdmin.email, name: defaultAdmin.name, role: defaultAdmin.role };
+    }
+  }
+
+  return null;
+}
 
 async function verifyAdminPasscode(inputPasscode) {
   if (!inputPasscode || typeof inputPasscode !== 'string') return false;
@@ -339,7 +449,6 @@ async function verifyAdminPasscode(inputPasscode) {
         if (mysqlPasscode.startsWith('$2a$') || mysqlPasscode.startsWith('$2b$')) {
           return bcrypt.compare(inputPasscode, mysqlPasscode);
         }
-        // Migrate plaintext setting to bcrypt hash on first successful login
         if (inputPasscode === mysqlPasscode) {
           const hash = await bcrypt.hash(inputPasscode, 10);
           await settingRepo.set('admin_passcode', hash);
@@ -359,7 +468,6 @@ async function verifyAdminPasscode(inputPasscode) {
       if (setting.value.startsWith('$2a$') || setting.value.startsWith('$2b$')) {
         return bcrypt.compare(inputPasscode, setting.value);
       }
-      // Migrate plaintext setting to bcrypt hash on first successful login
       if (inputPasscode === setting.value) {
         const hash = await bcrypt.hash(inputPasscode, 10);
         await SettingsModel.findOneAndUpdate({ key: 'admin_passcode' }, { value: hash });
@@ -369,8 +477,8 @@ async function verifyAdminPasscode(inputPasscode) {
     }
   }
 
-  // 4. Fallback to memoryPasscode / process.env.ADMIN_PASSCODE
-  const expected = process.env.ADMIN_PASSCODE || memoryPasscode;
+  // 4. Fallback to memoryPasscode / process.env.ADMIN_PASSCODE / default kma2026
+  const expected = process.env.ADMIN_PASSCODE || memoryPasscode || 'kma2026';
   if (expected.startsWith('$2a$') || expected.startsWith('$2b$')) {
     return bcrypt.compare(inputPasscode, expected);
   }
@@ -481,26 +589,40 @@ app.get('/api/health', (req, res) => {
 // POST /api/auth/login (Rate limited)
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
   try {
-    const { passcode } = req.body;
-    if (!passcode) {
-      return res.status(400).json({ success: false, message: 'Passcode is required.' });
-    }
+    const { email, password, passcode } = req.body;
 
-    const isValid = await verifyAdminPasscode(passcode);
-    if (!isValid) {
-      return res.status(401).json({
+    let adminUser = null;
+
+    if (email && password) {
+      adminUser = await verifyAdminCredentials(email, password);
+    } else if (passcode) {
+      // Legacy passcode fallback
+      const isPasscodeValid = await verifyAdminPasscode(passcode);
+      if (isPasscodeValid) {
+        adminUser = { email: 'admin@kma.com', name: 'Admin', role: 'admin' };
+      }
+    } else {
+      return res.status(400).json({
         success: false,
-        authenticated: false,
-        message: 'Invalid administrative passcode.'
+        message: 'Email and password are required.'
       });
     }
 
-    const { token } = createSessionToken();
+    if (!adminUser) {
+      return res.status(401).json({
+        success: false,
+        authenticated: false,
+        message: 'Invalid email or password.'
+      });
+    }
+
+    const { token } = createSessionToken(adminUser);
     res.cookie(COOKIE_NAME, token, COOKIE_OPTIONS);
 
     return res.json({
       success: true,
       authenticated: true,
+      user: adminUser,
       message: 'Admin authenticated successfully.'
     });
   } catch (err) {
@@ -512,9 +634,11 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 app.get('/api/auth/me', (req, res) => {
   const token = req.cookies?.[COOKIE_NAME];
   const isValid = verifySessionToken(token);
+  const user = isValid ? getSessionUser(token) : null;
   return res.json({
     success: true,
-    authenticated: isValid
+    authenticated: isValid,
+    user: user || (isValid ? { email: 'admin@kma.com', name: 'Admin', role: 'admin' } : null)
   });
 });
 
@@ -529,7 +653,48 @@ app.post('/api/auth/logout', (req, res) => {
   return res.json({ success: true, message: 'Logged out successfully.' });
 });
 
-// POST /api/auth/change-passcode (Requires Admin Auth)
+// POST /api/auth/change-password (Requires Admin Auth)
+app.post('/api/auth/change-password', requireAdminAuth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword, email } = req.body;
+    const targetEmail = (email).trim().toLowerCase();
+
+    if (!newPassword || newPassword.length < 4) {
+      return res.status(400).json({ success: false, message: 'New password must be at least 4 characters.' });
+    }
+
+    if (currentPassword) {
+      const verified = await verifyAdminCredentials(targetEmail, currentPassword);
+      if (!verified) {
+        return res.status(401).json({ success: false, message: 'Current password is incorrect.' });
+      }
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+
+    // 1. MySQL
+    if (isMySQLConnected()) {
+      await adminRepo.updatePassword(targetEmail, hashed);
+    }
+
+    // 2. MongoDB
+    if (isMongoConnected) {
+      await AdminModel.findOneAndUpdate(
+        { email: targetEmail },
+        { password_hash: hashed, updatedAt: new Date() },
+        { upsert: true }
+      );
+    }
+
+    // JSON file writes removed — MySQL is the sole persistence layer for passwords
+
+    return res.json({ success: true, message: 'Password updated successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/auth/change-passcode (Requires Admin Auth - Backward Compatibility)
 app.post('/api/auth/change-passcode', requireAdminAuth, async (req, res) => {
   try {
     const { currentPasscode, newPasscode } = req.body;
@@ -600,8 +765,8 @@ app.post('/api/data', requireAdminAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid portfolio data payload.' });
     }
 
+    // Update memory cache only (no JSON file write — MySQL is source of truth)
     memoryPortfolioData = incomingData;
-    saveLocalFile(LOCAL_DATA_FILE, incomingData);
 
     if (isMySQLConnected()) {
       await portfolioRepo.save('kma_portfolio_main', incomingData);
@@ -706,9 +871,9 @@ app.post('/api/projects', requireAdminAuth, async (req, res) => {
       updatedAt: now
     };
 
+    // Persist to MySQL; keep memory cache consistent but don't write to JSON
     const portfolio = getMemoryPortfolio();
     portfolio.projects = [project, ...portfolio.projects.filter((p) => p.id !== project.id)];
-    saveLocalFile(LOCAL_DATA_FILE, portfolio);
 
     if (isMySQLConnected()) {
       await projectRepo.create(project);
@@ -743,6 +908,7 @@ app.put('/api/projects/:id', requireAdminAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid payload.' });
     }
 
+    // For memory fallback only; primary write goes to MySQL
     const portfolio = getMemoryPortfolio();
     const existingIdx = portfolio.projects.findIndex((p) => p.id === id);
     const existing = existingIdx >= 0 ? portfolio.projects[existingIdx] : {};
@@ -759,7 +925,6 @@ app.put('/api/projects/:id', requireAdminAuth, async (req, res) => {
     } else {
       portfolio.projects.push(updated);
     }
-    saveLocalFile(LOCAL_DATA_FILE, portfolio);
 
     if (isMySQLConnected()) {
       await projectRepo.update(id, updated);
@@ -789,9 +954,9 @@ app.put('/api/projects/:id', requireAdminAuth, async (req, res) => {
 app.delete('/api/projects/:id', requireAdminAuth, async (req, res) => {
   try {
     const { id } = req.params;
+    // Sync memory cache; MySQL handles permanent deletion
     const portfolio = getMemoryPortfolio();
     portfolio.projects = portfolio.projects.filter((p) => p.id !== id);
-    saveLocalFile(LOCAL_DATA_FILE, portfolio);
 
     if (isMySQLConnected()) {
       await projectRepo.delete(id);
@@ -850,12 +1015,12 @@ app.post('/api/services', requireAdminAuth, async (req, res) => {
       updatedAt: now
     };
 
+    // Sync memory cache; MySQL handles persistence
     const portfolio = getMemoryPortfolio();
     const currentServices = portfolio.services || portfolio.practiceAreas || [];
     const updatedServices = [...currentServices, newService];
     portfolio.services = updatedServices;
     portfolio.practiceAreas = updatedServices;
-    saveLocalFile(LOCAL_DATA_FILE, portfolio);
 
     if (isMySQLConnected()) {
       await serviceRepo.create(newService);
@@ -885,6 +1050,7 @@ app.put('/api/services/:id', requireAdminAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
+    // Sync memory cache; MySQL handles persistence
     const portfolio = getMemoryPortfolio();
     const currentServices = portfolio.services || portfolio.practiceAreas || [];
 
@@ -893,7 +1059,6 @@ app.put('/api/services/:id', requireAdminAuth, async (req, res) => {
     );
     portfolio.services = updatedServices;
     portfolio.practiceAreas = updatedServices;
-    saveLocalFile(LOCAL_DATA_FILE, portfolio);
 
     if (isMySQLConnected()) {
       await serviceRepo.update(id, updates);
@@ -918,12 +1083,12 @@ app.put('/api/services/:id', requireAdminAuth, async (req, res) => {
 app.delete('/api/services/:id', requireAdminAuth, async (req, res) => {
   try {
     const { id } = req.params;
+    // Sync memory cache; MySQL handles permanent deletion
     const portfolio = getMemoryPortfolio();
     const currentServices = portfolio.services || portfolio.practiceAreas || [];
     const updatedServices = currentServices.filter((s) => s.id !== id);
     portfolio.services = updatedServices;
     portfolio.practiceAreas = updatedServices;
-    saveLocalFile(LOCAL_DATA_FILE, portfolio);
 
     if (isMySQLConnected()) {
       await serviceRepo.delete(id);
@@ -991,8 +1156,8 @@ app.post('/api/bookings', bookingLimiter, async (req, res) => {
       updatedAt: now
     };
 
+    // Sync memory cache; MySQL handles persistence
     memoryBookings = [newBooking, ...memoryBookings];
-    saveLocalFile(LOCAL_BOOKINGS_FILE, memoryBookings);
 
     if (isMySQLConnected()) {
       await bookingRepo.create(newBooking);
@@ -1024,10 +1189,10 @@ app.patch('/api/bookings/:id/status', requireAdminAuth, async (req, res) => {
     }
 
     const now = new Date().toISOString();
+    // Sync memory cache; MySQL handles persistence
     memoryBookings = memoryBookings.map((b) =>
       b.id === id ? { ...b, status, updatedAt: now } : b
     );
-    saveLocalFile(LOCAL_BOOKINGS_FILE, memoryBookings);
 
     if (isMySQLConnected()) {
       await bookingRepo.updateStatus(id, status);
@@ -1051,10 +1216,10 @@ app.patch('/api/bookings/:id', requireAdminAuth, async (req, res) => {
     const { status } = req.body;
     const now = new Date().toISOString();
 
+    // Sync memory cache; MySQL handles persistence
     memoryBookings = memoryBookings.map((b) =>
       b.id === id ? { ...b, status, updatedAt: now } : b
     );
-    saveLocalFile(LOCAL_BOOKINGS_FILE, memoryBookings);
 
     if (isMySQLConnected()) {
       await bookingRepo.updateStatus(id, status);
@@ -1075,8 +1240,8 @@ app.patch('/api/bookings/:id', requireAdminAuth, async (req, res) => {
 app.delete('/api/bookings/:id', requireAdminAuth, async (req, res) => {
   try {
     const { id } = req.params;
+    // Sync memory cache; MySQL handles permanent deletion
     memoryBookings = memoryBookings.filter((b) => b.id !== id);
-    saveLocalFile(LOCAL_BOOKINGS_FILE, memoryBookings);
 
     if (isMySQLConnected()) {
       await bookingRepo.delete(id);

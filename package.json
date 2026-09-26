@@ -13,7 +13,10 @@
     "build": "node scripts/build.js",
     "preview": "vite preview",
     "deploy": "node scripts/deploy_ftp.js",
-    "package:prod": "node scripts/package_production.js"
+    "package:prod": "node scripts/package_production.js",
+    "create:admin": "node scripts/create_admin.js",
+    "create-admin": "node scripts/create_admin.js",
+    "migrate:json": "node scripts/migrate_json_to_mysql.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

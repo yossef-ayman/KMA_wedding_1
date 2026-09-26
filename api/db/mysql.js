@@ -159,6 +159,18 @@ async function createTablesIfNotExist() {
       \`value\` TEXT NOT NULL,
       \`updated_at\` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (\`key_name\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
+
+    `CREATE TABLE IF NOT EXISTS \`admins\` (
+      \`id\` VARCHAR(64) NOT NULL,
+      \`email\` VARCHAR(128) NOT NULL UNIQUE,
+      \`password_hash\` VARCHAR(255) NOT NULL,
+      \`name\` VARCHAR(128) DEFAULT 'Admin',
+      \`role\` VARCHAR(32) DEFAULT 'admin',
+      \`created_at\` DATETIME DEFAULT CURRENT_TIMESTAMP,
+      \`updated_at\` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (\`id\`),
+      UNIQUE KEY \`idx_admin_email\` (\`email\`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`
   ];
 
@@ -508,5 +520,38 @@ export const settingRepo = {
       [keyName, value]
     );
     return true;
+  }
+};
+
+// --- ADMIN REPOSITORY ---
+export const adminRepo = {
+  async findByEmail(email) {
+    if (!pool || !email) return null;
+    const [rows] = await pool.query('SELECT * FROM admins WHERE LOWER(email) = LOWER(?) LIMIT 1', [email.trim()]);
+    return rows && rows.length > 0 ? rows[0] : null;
+  },
+
+  async upsertAdmin(admin) {
+    if (!pool || !admin.email || !admin.password_hash) return false;
+    const id = admin.id || `admin_${Date.now()}`;
+    await pool.query(
+      `INSERT INTO admins (id, email, password_hash, name, role, updated_at)
+       VALUES (?, LOWER(?), ?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), name = VALUES(name), role = VALUES(role), updated_at = NOW()`,
+      [id, admin.email.trim(), admin.password_hash, admin.name || 'Admin', admin.role || 'admin']
+    );
+    return true;
+  },
+
+  async updatePassword(email, passwordHash) {
+    if (!pool || !email || !passwordHash) return false;
+    await pool.query('UPDATE admins SET password_hash = ?, updated_at = NOW() WHERE LOWER(email) = LOWER(?)', [passwordHash, email.trim()]);
+    return true;
+  },
+
+  async count() {
+    if (!pool) return 0;
+    const [rows] = await pool.query('SELECT COUNT(*) as cnt FROM admins');
+    return rows && rows.length > 0 ? rows[0].cnt : 0;
   }
 };
