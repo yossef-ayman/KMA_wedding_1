@@ -2,10 +2,10 @@
   {
     "id": "admin_61646d696e406b6d",
     "email": "admin@kma.com",
-    "password_hash": "$2b$10$cVQITnjb/g3coYABBj0KouhMC8g6FpAOgVKMq9.r2mcEU8Q9.9fEO",
+    "password_hash": "$2b$10$fvOfQ/m9fjbQW1xXOb5y.eq2twPHqf62ws3YTCqF4a.gTDZyddqfW",
     "name": "KMA Admin",
     "role": "admin",
-    "created_at": "2026-09-26T14:40:21.800Z",
-    "updated_at": "2026-09-26T14:40:21.801Z"
+    "created_at": "2026-09-26T15:18:14.808Z",
+    "updated_at": "2026-09-26T15:18:14.809Z"
   }
 ]

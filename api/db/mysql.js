@@ -15,13 +15,13 @@ let isConnected = false;
 export async function initMySQL() {
   if (isConnected && pool) return true;
 
-  // Check if MySQL connection parameters are defined
   const hasConfig =
     process.env.MYSQL_URL ||
     process.env.DATABASE_URL ||
     (process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER);
 
   if (!hasConfig) {
+    console.warn('[MySQL] Missing database configuration in environment variables.');
     return false;
   }
 
@@ -50,18 +50,20 @@ export async function initMySQL() {
 
     pool = mysql.createPool(poolConfig);
 
-    // Test ping
+    // Test connection
     const connection = await pool.getConnection();
     connection.release();
 
     isConnected = true;
     console.log('[MySQL] Connected to MySQL database pool successfully.');
 
-    // Auto-create tables if they don't exist
     await createTablesIfNotExist();
     return true;
   } catch (err) {
-    console.warn('[MySQL] Database connection skipped/failed:', err.message);
+    // طباعة الخطأ بالكامل
+    console.error('[MySQL] Database connection failed with error:');
+    console.error(err);
+
     isConnected = false;
     pool = null;
     return false;
